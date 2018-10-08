@@ -18,9 +18,7 @@ let make_move p d = (p, d)
 
 let apply_move g move = failwith "TODO apply_move"
 
-let rec moves = function
-    | [] -> []
-    | ((x,y), i)::b
+let moves g = failwith "TODO moves"
 
 let get_balls g = g
 
