@@ -16,11 +16,8 @@ let eq_ball b b' = match b,b' with (_, i),(_, i') -> i = i'
 
 let make_move p d = (p, d)
 
-let apply_move g move = failwith "TODO apply_move"
 
-let rec moves = function
-    | [] -> []
-    | ((x,y), i)::b
+let moves g = []
 
 let get_balls g = g
 
@@ -39,3 +36,17 @@ let ball_of_position game p =
   aux game
 
 let position_of_ball b = match b with (a, _) -> a
+
+let apply_move a b =
+  let  g,((p, i), d) = Obj.magic (a,b) in
+  let next_pos (x',y') = match d with Up -> (x',y'+1) | Right -> (x'+1, y') | Down -> (x', y'-1) | Left -> (x'-1, y') in
+  let pos_in_range (x', y') = 0 <= x' && 0<= y' && x' < 15 && y' < 15 in
+  let p' = next_pos p in
+  if is_ball g p' then g
+  else let rec aux game i' p' =
+         let p'' = next_pos p' in
+         if not (pos_in_range p'') then if i=i' then g else List.filter (fun (_, k) -> k!=i) game
+         else if is_ball game p'' then let (q, j) = ball_of_position game p'' in
+           aux (List.map (fun (a,b) -> if b=i' then (p', i') else (a,b)) game) j (next_pos q)
+         else aux game i' p'' in Obj.magic (aux g i p')
+

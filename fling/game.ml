@@ -94,7 +94,10 @@ and solve () =
 
 (* loop game loops on the game while their is still moves possible for the player *)
 and loop game =
-  failwith "TODO loop"
+  let mov = get_next_move game in
+  let g =  Rules.apply_move game mov in
+  D.draw_game max_x max_y g;
+  loop g;
 
 (* solver game solve the game if it is possible *)
 and solver game  =
