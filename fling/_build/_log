@@ -24,9 +24,9 @@ ocamlfind ocamldep -package graphics -modules position.ml > position.ml.depends 
 # Target: position.cmx, tags: { package(graphics), compile, extension:cmx, extension:ml, file:position.cmx, file:position.ml, implem, native, ocaml, quiet }
 ocamlfind ocamlopt -c -package graphics -o position.cmx position.ml # cached
 # Target: rules.ml.depends, tags: { package(graphics), extension:ml, file:rules.ml, ocaml, ocamldep, quiet }
-ocamlfind ocamldep -package graphics -modules rules.ml > rules.ml.depends # cached
+ocamlfind ocamldep -package graphics -modules rules.ml > rules.ml.depends
 # Target: rules.cmx, tags: { package(graphics), compile, extension:cmx, extension:ml, file:rules.cmx, file:rules.ml, implem, native, ocaml, quiet }
-ocamlfind ocamlopt -c -package graphics -o rules.cmx rules.ml # cached
+ocamlfind ocamlopt -c -package graphics -o rules.cmx rules.ml
 # Target: draw.cmx, tags: { package(graphics), compile, extension:cmx, extension:ml, file:draw.cmx, file:draw.ml, implem, native, ocaml, quiet }
 ocamlfind ocamlopt -c -package graphics -o draw.cmx draw.ml # cached
 # Target: solver.ml.depends, tags: { package(graphics), extension:ml, file:solver.ml, ocaml, ocamldep, quiet }
@@ -40,5 +40,5 @@ ocamlfind ocamlopt -c -package graphics -o solver.cmx solver.ml # cached
 # Target: game.cmx, tags: { package(graphics), compile, extension:cmx, extension:ml, file:game.cmx, file:game.ml, implem, native, ocaml, quiet }
 ocamlfind ocamlopt -c -package graphics -o game.cmx game.ml # cached
 # Target: game.native, tags: { package(graphics), dont_link_with, extension:native, file:game.native, link, native, ocaml, program, quiet }
-ocamlfind ocamlopt -linkpkg -package graphics position.cmx rules.cmx draw.cmx solver.cmx game.cmx -o game.native # cached
+ocamlfind ocamlopt -linkpkg -package graphics position.cmx rules.cmx draw.cmx solver.cmx game.cmx -o game.native
 # Compilation successful.

@@ -1,1 +1,1 @@
-rules.ml: List Obj Position
+rules.ml: List Position
