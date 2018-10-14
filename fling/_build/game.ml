@@ -80,7 +80,12 @@ let create_game () =
 
 (* A menu is a pair of string * f where f is a function of type unit -> unit.
    If the player choose on the menu which function should be called *)
-let rec menu = [("solve", solve);("play", play);("exit", leave)]
+let rec menu = [("solve", solve);("play", play);("exit", leave);("open", op)]
+and op () =
+  game := Save.op ();
+  D.ready false;
+  D.draw_game max_x max_y (!game);
+  loop !game
 
 (* play allows the player to create a new game, and then try to solve it *)
 and play () =
@@ -94,6 +99,11 @@ and solve () =
 
 (* loop game loops on the game while their is still moves possible for the player *)
 and loop game =
+  (*let status = G.wait_next_event [G.Button_down;G.Key_pressed] in
+  if status.G.keypressed = true &&  Char.chr (Char.code status.G.key) = 's' then
+    begin Draw.ready true; l end
+  else*)
+  get_key_pressed (fun c -> if c='s' then Save.save game);
   let mov = get_next_move game in
   let g =  Rules.apply_move game mov in
   D.draw_game max_x max_y g;
