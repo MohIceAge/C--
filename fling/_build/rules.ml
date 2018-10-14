@@ -8,18 +8,37 @@ type game = ball list
 
 let i = ref 0
 
+(*Raccourcis*)
+let px, py = Position.proj_x , Position.proj_y
+let pos = Position.from_int
+
+(*Renvoi la position dans la direction opposé de dir*)
+let prev_pos dir p = let x = px p and y = py p in
+  match dir with Down -> pos x (y+1)
+    | Left -> pos (x+1) y
+    | Up -> pos x (y-1)
+    | Right -> pos (x-1) y
+
+(*Renvoi la position dans la direction de dir*)
+let next_pos dir p = let x = px p and y = py p in
+  match dir with Up -> pos x (y+1)
+    | Right -> pos (x+1) y
+    | Down -> pos x (y-1)
+    | Left -> pos (x-1) y
+
 let make_ball p = i := !i + 1; (p, !i-1)
 
 let new_game ps = ps
 
 let eq_ball b b' = match b,b' with (_, i),(_, i') -> i = i'
 
-let make_move p d = (p, d)
 
-
-let moves g = []
+let make_move b d = (b, d)
 
 let get_balls g = g
+
+let won game = (List.length (get_balls game)) <2
+
 
 let is_ball g p =
   let rec aux = function
@@ -27,6 +46,30 @@ let is_ball g p =
     | (p', i)::b -> if Position.eq p p' then true else aux b
   in
   aux (get_balls g)
+
+
+(*Renvoi la liste des balles de balls se trouvant dans la direction dir dans l'ordre *)
+let balls_dir b dir balls = let (p, id) = b in
+  let x,y = px p, py p in
+  let selector b' = let (p', _) = b' in match dir with Up -> x = (px p') && y < (py p')
+    | Right -> y = (py p') && x < (px p')
+    | Down -> x = (px p') && y > (py p')
+    | Left -> y = (py p') && x > (px p') in
+  let ordre b b' = let (p, _), (p', _) = b, b' in match dir with Up -> (py p') - (py p)
+    | Right -> (px p') - (px p)
+    | Down -> (py p) - (py p')
+    | Left -> (px p) - (px p') in
+  List.sort ordre (List.filter selector balls)
+
+let moves g = let balls = get_balls g in
+  let ball_moves b = let (p, id) = b in
+    let l = List.filter (fun dir -> not (is_ball g (next_pos dir p)) && (balls_dir b dir balls) != [] ) [Up; Right; Down; Left] in
+    List.map (fun dir -> make_move b dir) l
+  in
+  List.concat (List.map ball_moves balls)
+
+
+
 
 let ball_of_position game p =
   let rec aux = function
@@ -38,32 +81,10 @@ let ball_of_position game p =
 let position_of_ball b = match b with (a, _) -> a
 
 let apply_move g move =
-  (*Raccourcis*)
-  let px = Position.proj_x and py = Position.proj_y in
-  let pos = Position.from_int in
-
   let (b, dir) = move in
   let (p, id) = b in
-  let x,y = px p, py p in
 
   let balls = get_balls g in
-
-  (*Creation de la liste des balles se trouvant dans la direction dir dans l'ordre*)
-  let selector b' = let (p', _) = b' in match dir with Up -> x = (px p') && y < (py p')
-    | Right -> y = (py p') && x < (px p')
-    | Down -> x = (px p') && y > (py p')
-    | Left -> y = (py p') && x > (px p') in
-  let ordre b b' = let (p, _), (p', _) = b, b' in match dir with Up -> (py p') - (py p)
-    | Right -> (px p') - (px p)
-    | Down -> (py p) - (py p')
-    | Left -> (px p) - (px p') in
-  let balls_dir = List.sort ordre (List.filter selector balls) in
-
-  let prev_pos p = let x = px p and y = py p in
-  match dir with Down -> pos x (y+1)
-    | Left -> pos (x+1) y
-    | Up -> pos x (y-1)
-    | Right -> pos (x-1) y in
 
   (*Met à jour les positions des balles*)
   let update_game g balls =
@@ -76,32 +97,11 @@ let apply_move g move =
     List.filter (fun b' -> not (eq_ball b b')) balls in
 
   (*Renvoi la liste des balles dont la position doit changer*)
-  let rec aux acc lst = function [] -> if eq_ball lst b then g else remove_ball (update_game g acc) lst
-    | (p', i')::q -> let (p, i) = lst in if i=id  && Position.eq p (prev_pos p') then g
-      else let acc' = ((prev_pos p'), i)::acc in
+  let rec aux acc lst = function [] -> if eq_ball lst b then g (*Pas de balle dans la direction choisie*)
+                                        else remove_ball (update_game g acc) lst (* On supprime la balle qui sort du quadrillage*)
+    | (p', i')::q -> let (p, i) = lst in if i=id  && Position.eq p (prev_pos dir p') then g (* Si la premiere balle est collé on ne fait rien*)
+      else let acc' = ((prev_pos dir p'), i)::acc in (* sinon on empile la modification à faire *)
         aux acc' (p', i') q in
 
-  aux [] b balls_dir
+  aux [] b (balls_dir b dir balls)
 
-  (*
-  let remove_ball balls b =
-    List.filter (fun b' -> not eq_ball b b') balls
-
-  let next_pos p = let x = px p and y = py p in
-    match dir with Up -> pos x (y+1)
-      | Right -> pos (x+1) y
-      | Down -> pos x (y-1)
-      | Left -> pos (x-1) y in
-
-  let balls_dir = List.fold_left ()
-
-  let p' = next_pos p in
-  if is_ball g p' then g
-  else let rec aux balls i' p' =
-         let p'' = next_pos p' in
-         if not (pos_in_range p'') then if i=i' then g else List.filter (fun (_, k) -> k!=i) game
-         else if is_ball game p'' then let (q, j) = ball_of_position game p'' in
-           aux (List.map (fun (a,b) -> if b=i' then (p', i') else (a,b)) game) j (next_pos q)
-         else aux g i' p'' in Obj.magic (aux g i p')
-
-  *)

@@ -97,7 +97,9 @@ and loop game =
   let mov = get_next_move game in
   let g =  Rules.apply_move game mov in
   D.draw_game max_x max_y g;
-  loop g;
+  if Rules.won g then begin
+    D.draw_string "You win!"; get_key_pressed (fun c -> main menu)
+  end else loop g;
 
 (* solver game solve the game if it is possible *)
 and solver game  =

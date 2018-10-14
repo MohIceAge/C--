@@ -20,6 +20,9 @@ val eq_ball : ball -> ball -> bool
 (** [make_move b d] returns a new move from a ball [b] and a direction [d] *)
 val make_move : ball -> direction -> move
 
+(** [ended g] returns true iff the player won*)
+val won : game -> bool
+
 (** [apply_move game move] returns a new game where [move] has been applied to [game] *)
 val apply_move : game -> move -> game
 
