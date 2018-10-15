@@ -1,0 +1,6 @@
+Choses faites:
+	- Completer rules.ml et game.ml
+	- Coder la resolution naive
+	- Permettre l'enregistrement d'une partie (En cliquant sur s lorsque l'on commence à jouer une partie)
+	- Permettre l'ouverture d'une partie enregistrée
+
