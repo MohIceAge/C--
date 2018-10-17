@@ -96,12 +96,12 @@ let apply_move g move =
   let remove_ball balls b =
     List.filter (fun b' -> not (eq_ball b b')) balls in
 
-  (*Renvoi la liste des balles dont la position doit changer*)
+
   let rec aux acc lst = function [] -> if eq_ball lst b then g (*Pas de balle dans la direction choisie*)
                                         else remove_ball (update_game g acc) lst (* On supprime la balle qui sort du quadrillage*)
     | (p', i')::q -> let (p, i) = lst in if i=id  && Position.eq p (prev_pos dir p') then g (* Si la premiere balle est collé on ne fait rien*)
       else let acc' = ((prev_pos dir p'), i)::acc in (* sinon on empile la modification à faire *)
         aux acc' (p', i') q in
-
+  if is_ball g (next_pos dir p) then g else
   aux [] b (balls_dir b dir balls)
 
