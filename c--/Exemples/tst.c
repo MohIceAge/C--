@@ -1,6 +1,10 @@
+#ifndef MCC
+#include <stdio.h>
+#include <stdlib.h>
+#endif
 
-int main ()
+int main (int argc, char **argv)
 {
-	printf("hello\n");
-	return ;
+  while(0) printf("heloo");
+  return 0;
 }
