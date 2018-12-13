@@ -5,6 +5,12 @@
 
 int main (int argc, char **argv)
 {
-  while(0) printf("heloo");
+  int i;
+  i=1;
+  if(1){
+    int i;
+    i=2;
+  }
+  printf("i=%d\n", i);
   return 0;
 }

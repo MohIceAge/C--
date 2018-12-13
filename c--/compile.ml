@@ -31,8 +31,11 @@ let compile out =
       | _-> "" in (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl)))^(aux 0 decl)
   and compile_code  = function
       CBLOCK(decl, l) -> List.iter (fun a -> match a with CDECL(_, name) -> local_vars := name::!local_vars | _ -> ()) decl;
-        (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl))) else "") ^
-        (join (List.map (fun (_, code) -> compile_code code) l))
+        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl))) else "") ^
+        (join (List.map (fun (_, code) -> compile_code code) l)) ^
+        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp\n" (8*(List.length decl))) else "") in
+        List.iter (fun a -> match !local_vars with _::lcl -> local_vars := lcl | _ -> ()) decl;
+        s
     | CEXPR((_, expr)) -> compile_expr expr
     | CIF((_, expr), (_, code1), (_, code2)) -> let id = uniqid () in
         Printf.sprintf "%s\n\tcmpq $0, %%rax\n\tje .if%s_eb\n%s\n\tjmp .if%s_ee\n.if%s_eb:\n%s\n.if%s_ee:\n" (compile_expr expr) id (compile_code code1) id id (compile_code code2) id
