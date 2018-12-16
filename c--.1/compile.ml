@@ -1,7 +1,3 @@
-
-(* Ecrit par Mohamed Hadjoudj *)
-
-
 open Cparse
 open Genlab
 
@@ -47,6 +43,7 @@ let compile out =
         Printf.sprintf ".while%s_b:\n%s\n\tcmpq $0, %%rax\n\tje .while%s_e\n%s\n\tjmp .while%s_b\n.while%s_e:\n" id (compile_expr expr) id (compile_code code) id id
     | CRETURN(None) -> "\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
     | CRETURN(Some((_, expr))) -> (compile_expr expr)^"\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
+    | _ -> ""
   and compile_expr = function
       CST(i) -> Printf.sprintf "\tmovq $%d, %%rax\n" i
     | VAR(s) -> Printf.sprintf "\tmovq %s, %%rax \n" (var_reg s)    | STRING(s) -> strings := s::!strings; Printf.sprintf "\tleaq .ST%d(%%rip), %%rax\n" (List.length !strings)
