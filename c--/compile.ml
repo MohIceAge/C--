@@ -35,9 +35,9 @@ let compile out =
       | _-> "" in (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl)))^(aux 0 decl)
   and compile_code  = function
       CBLOCK(decl, l) -> List.iter (fun a -> match a with CDECL(_, name) -> local_vars := name::!local_vars | _ -> ()) decl;
-        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl))) else "") ^
+        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp#création des variables local (entrée de boucle)\n\n" (8*(List.length decl))) else "") ^
         (join (List.map (fun (_, code) -> compile_code code) l)) ^
-        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp\n" (8*(List.length decl))) else "") in
+        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp #supression des variables local (sortie de boucle)\n" (8*(List.length decl))) else "") in
         List.iter (fun a -> match !local_vars with _::lcl -> local_vars := lcl | _ -> ()) decl;
         s
     | CEXPR((_, expr)) -> compile_expr expr
