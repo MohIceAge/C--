@@ -1,3 +1,7 @@
+
+(* Ecrit par Mohamed Hadjoudj *)
+
+
 open Cparse
 open Genlab
 
@@ -8,10 +12,12 @@ let rec find_i e =
     | a::q -> if a=e then Some(i) else aux (i+1) q
   in aux 0;;
 
-let args_reg = [|"%rdi";"%rsi";"%rdx";"%rcx";"%r8";"%r9"|];;
+let  args_reg = [|"%rdi";"%rsi";"%rdx";"%rcx";"%r8";"%r9"|];;
 let join = String.concat "";;
-let compile out = 
+let joinLines l = String.concat "\n" (""::l);;
+let compile out l = 
   let global_vars = ref ["NULL"] and local_vars = ref [] and funs = ref [] in
+  let tryStack = ref [] in
   let strings = ref [] in
   let uniqid_ = ref 0 in
   let uniqid () = uniqid_ := !uniqid_+1; string_of_int !uniqid_ in
@@ -22,6 +28,7 @@ let compile out =
       | Some(i) -> Printf.sprintf "-%d(%%rbp)" (8*((List.length !local_vars)-i)))
   in let rec declare_args decl =
     local_vars := [];
+    tryStack := [];
     if decl = [] then "" else
     let arg = function i when i < 6 -> args_reg.(i)
       | i -> let s = (string_of_int ((i-4)*8))^"(%rbp)" in Printf.sprintf "%s, %%r13\n\tmovq %%r13" s in
@@ -31,9 +38,9 @@ let compile out =
       | _-> "" in (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl)))^(aux 0 decl)
   and compile_code  = function
       CBLOCK(decl, l) -> List.iter (fun a -> match a with CDECL(_, name) -> local_vars := name::!local_vars | _ -> ()) decl;
-        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl))) else "") ^
+        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp#création des variables local (entrée de boucle)\n\n" (8*(List.length decl))) else "") ^
         (join (List.map (fun (_, code) -> compile_code code) l)) ^
-        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp\n" (8*(List.length decl))) else "") in
+        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp #supression des variables local (sortie de boucle)\n" (8*(List.length decl))) else "") in
         List.iter (fun a -> match !local_vars with _::lcl -> local_vars := lcl | _ -> ()) decl;
         s
     | CEXPR((_, expr)) -> compile_expr expr
@@ -43,7 +50,30 @@ let compile out =
         Printf.sprintf ".while%s_b:\n%s\n\tcmpq $0, %%rax\n\tje .while%s_e\n%s\n\tjmp .while%s_b\n.while%s_e:\n" id (compile_expr expr) id (compile_code code) id id
     | CRETURN(None) -> "\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
     | CRETURN(Some((_, expr))) -> (compile_expr expr)^"\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
-    | _ -> ""
+      | CTHROW(name, (_, expr)) -> (match !tryStack with
+          [] -> "#return + exception"
+        | id::tryStack2 -> tryStack := tryStack2; (compile_expr expr)^"\tjmp .try"^id^"_b\n")
+      | CTRY((pct, codetry), excepl, fin) ->
+      let id = uniqid () in tryStack:=id::!tryStack; joinLines ([
+        "#Try";
+        compile_code codetry;
+        ".try"^id^"_b:"
+      ]@(
+        List.map (fun a -> let (nam, var, loc_code) = a in let (loc, code) = loc_code in 
+          let exceptId = ".except"^id^"_"^nam in
+          joinLines [
+            exceptId^"_b:";
+            compile_expr (CALL("strcmp", [(loc, STRING(nam)); (loc, VAR(var))]));
+            "\tcmpq $0, $rax";
+            "\tjne "^exceptId^"_e";
+            compile_code code;
+            "\tjmp .try"^id^"_e";
+            exceptId^"_e:";
+          ]
+        ) excepl
+      )@( (match fin with None -> compile_code (CTRY ((pct, codetry), excepl, fin)) | Some((_, code)) -> compile_code code)::["\n.try"^id^"_e:"]
+      ))
+
   and compile_expr = function
       CST(i) -> Printf.sprintf "\tmovq $%d, %%rax\n" i
     | VAR(s) -> Printf.sprintf "\tmovq %s, %%rax \n" (var_reg s)    | STRING(s) -> strings := s::!strings; Printf.sprintf "\tleaq .ST%d(%%rip), %%rax\n" (List.length !strings)
@@ -94,4 +124,4 @@ let compile out =
     | [] -> output ()
     | CDECL(_, name)::q -> declare_int name; aux q
     | CFUN(_, name, decl, (_, code))::q -> funs := (compile_fun name decl code)::!funs; aux q
-  in aux
+  in aux l
