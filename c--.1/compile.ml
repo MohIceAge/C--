@@ -5,123 +5,362 @@
 open Cparse
 open Genlab
 
-(* trouve le plus petit index de l'élément e dans l *)
-let rec find_i e =
-  let rec aux i = function 
-    | [] -> None
-    | a::q -> if a=e then Some(i) else aux (i+1) q
-  in aux 0;;
+type instruction = 
+    Comment of string
+  | Ncomment of string
+  | Mov of arg * arg
+  | Push of arg
+  | Pop of arg
+  | Inc of arg
+  | Dec of arg
+  | Neg of arg
+  | Not of arg
+  | Lea of arg * arg
+  | Add of arg * arg
+  | Sub of arg * arg
+  | Mul of arg * arg
+  | Div of arg
+  | Cmp of arg * arg
+  | Label of string 
+  | SubLabel of int 
+  | Jmp of int 
+  | Jle of int
+  | Jl of int
+  | Je of int
+  | Jne of int
+  | Call of string
+  | CallExt of string
+  | Ret
+and arg = 
+  | Reg of register
+  | Str of string
+  | Cst of int
+  | GlobalVar of int
+  | ExtVar of string
+  | Offset of int * register
+  | ArrayEl of register * register
+and register = Rax | Rbx | Rcx | Rdx | Rsi | Rdi | Rbp | Rsp | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15 | Rip
+and program = instruction list
 
-let  args_reg = [|"%rdi";"%rsi";"%rdx";"%rcx";"%r8";"%r9"|];;
-let join = String.concat "";;
-let joinLines l = String.concat "\n" (""::l);;
-let compile out l = 
-  let global_vars = ref ["NULL"] and local_vars = ref [] and funs = ref [] in
-  let tryStack = ref [] in
+let rec getIndex e = function
+    [] -> None
+  | t::q -> if e = t then Some 0 
+            else (match (getIndex e q) with None -> None | Some i -> Some(i+1))
+
+let uniqI_ = ref 0
+let uniqI () = uniqI_ := !uniqI_ + 1; !uniqI_
+
+(* Renvoi la liste des variables utilisées dans un code. *)
+let rec var_used = function
+    CBLOCK (_, loccodelist) ->  List.flatten (List.map (fun (_, a) -> var_used a) loccodelist)
+  | CIF((_,expr), (_,code1), (_,code2)) -> (var_used_expr expr) @ (var_used code1) @ (var_used code2)
+  | CWHILE((_,expr), (_,code)) -> (var_used_expr expr) @ (var_used code)
+  | CEXPR(_, expr) -> var_used_expr expr
+  | CRETURN(Some (_,expr)) -> var_used_expr expr
+  | CTHROW (_, (_,expr)) -> var_used_expr expr
+  | CTRY((_,code), l, finally) -> 
+      let l' = match finally with
+          None -> code::(List.map (fun (_,_,(_, a)) -> a) l)
+        | Some(_,code2) ->code2::code::(List.map (fun (_,_,(_, a)) -> a) l) in
+      List.flatten (List.map var_used l')
+  | _ -> [] 
+
+(* Renvoi la liste des variables utilisées dans une expression. *)
+and var_used_expr = function
+  | VAR s -> [s]
+  | CST _ | STRING _ -> []
+  | SET_VAR(s, (_,expr)) -> s :: (var_used_expr expr)
+  | SET_ARRAY(s, (_,expr1), (_,expr2)) -> s :: (var_used_expr expr1) @ (var_used_expr expr2)
+  | CALL (s, l) -> List.flatten (List.map (fun (_, a) -> var_used_expr a) l)
+  | OP1 (_, (_, expr)) -> var_used_expr expr
+  | OP2 (_, (_, expr1), (_, expr2)) -> (var_used_expr expr1) @ (var_used_expr expr2)
+  | CMP (_, (_, expr1), (_, expr2)) -> (var_used_expr expr1) @ (var_used_expr expr2)
+  | EIF (e1, e2, e3) -> List.flatten (List.map (fun (_, a) -> var_used_expr a) [e1; e2; e3]) 
+  | ESEQ l -> List.flatten (List.map (fun (_, a) -> var_used_expr a) l)
+
+(* Vérifie si la variable est utilisée dans le code. *)
+let rec var_is_used name code = (getIndex name (var_used code)) != None
+
+(* Convertie un programme (liste d'instructions) en assembleur. *)
+let asm_of_program l = 
   let strings = ref [] in
-  let uniqid_ = ref 0 in
-  let uniqid () = uniqid_ := !uniqid_+1; string_of_int !uniqid_ in
-  let var_reg s = (match (find_i s !local_vars) with
-        None -> (match (find_i s !global_vars) with 
-          None -> (Printf.sprintf "%s(%%rip)" s)
-          | _ -> (Printf.sprintf ".%s(%%rip)" s))
-      | Some(i) -> Printf.sprintf "-%d(%%rbp)" (8*((List.length !local_vars)-i)))
-  in let rec declare_args decl =
-    local_vars := [];
-    tryStack := [];
-    if decl = [] then "" else
-    let arg = function i when i < 6 -> args_reg.(i)
-      | i -> let s = (string_of_int ((i-4)*8))^"(%rbp)" in Printf.sprintf "%s, %%r13\n\tmovq %%r13" s in
-    let rec aux i = function
-      | CDECL(_, name)::q  -> local_vars := name::!local_vars;
-        (Printf.sprintf "\tmovq %s, -%d(%%rbp) # var %s\n" (arg i) (8*(i+1)) name)^(aux (i+1) q);
-      | _-> "" in (Printf.sprintf "\tsubq $%d, %%rsp\n" (8*(List.length decl)))^(aux 0 decl)
-  and compile_code  = function
-      CBLOCK(decl, l) -> List.iter (fun a -> match a with CDECL(_, name) -> local_vars := name::!local_vars | _ -> ()) decl;
-        let s = (if decl != [] then (Printf.sprintf "\tsubq $%d, %%rsp#création des variables local (entrée de boucle)\n\n" (8*(List.length decl))) else "") ^
-        (join (List.map (fun (_, code) -> compile_code code) l)) ^
-        (if decl != [] then (Printf.sprintf "\taddq $%d, %%rsp #supression des variables local (sortie de boucle)\n" (8*(List.length decl))) else "") in
-        List.iter (fun a -> match !local_vars with _::lcl -> local_vars := lcl | _ -> ()) decl;
-        s
-    | CEXPR((_, expr)) -> compile_expr expr
-    | CIF((_, expr), (_, code1), (_, code2)) -> let id = uniqid () in
-        Printf.sprintf "%s\n\tcmpq $0, %%rax\n\tje .if%s_eb\n%s\n\tjmp .if%s_ee\n.if%s_eb:\n%s\n.if%s_ee:\n" (compile_expr expr) id (compile_code code1) id id (compile_code code2) id
-    | CWHILE((_, expr), (_, code)) -> let id = uniqid () in
-        Printf.sprintf ".while%s_b:\n%s\n\tcmpq $0, %%rax\n\tje .while%s_e\n%s\n\tjmp .while%s_b\n.while%s_e:\n" id (compile_expr expr) id (compile_code code) id id
-    | CRETURN(None) -> "\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
-    | CRETURN(Some((_, expr))) -> (compile_expr expr)^"\tmovq %rbp,%rsp\n\tpopq %rbp\n\tret\n"
-      | CTHROW(name, (_, expr)) -> (match !tryStack with
-          [] -> "#return + exception"
-        | id::tryStack2 -> tryStack := tryStack2; (compile_expr expr)^"\tjmp .try"^id^"_b\n")
-      | CTRY((pct, codetry), excepl, fin) ->
-      let id = uniqid () in tryStack:=id::!tryStack; joinLines ([
-        "#Try";
-        compile_code codetry;
-        ".try"^id^"_b:"
-      ]@(
-        List.map (fun a -> let (nam, var, loc_code) = a in let (loc, code) = loc_code in 
-          let exceptId = ".except"^id^"_"^nam in
-          joinLines [
-            exceptId^"_b:";
-            compile_expr (CALL("strcmp", [(loc, STRING(nam)); (loc, VAR(var))]));
-            "\tcmpq $0, $rax";
-            "\tjne "^exceptId^"_e";
-            compile_code code;
-            "\tjmp .try"^id^"_e";
-            exceptId^"_e:";
-          ]
-        ) excepl
-      )@( (match fin with None -> compile_code (CTRY ((pct, codetry), excepl, fin)) | Some((_, code)) -> compile_code code)::["\n.try"^id^"_e:"]
-      ))
+  let rec aux = function
+      Comment(s)::Comment(s')::q -> (aux (Comment (if s <> s' then s^"; "^s' else s)::q))
+    | Comment(s)::q -> " # "^s^(aux q)
+    | Ncomment(s)::q -> " \n# "^s^(aux q)
+    | Mov(x1, x2)::q -> " \n\tmovq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Push(x)::q -> " \n\tpushq "^(string_of_arg x)^(aux q)
+    | Pop(x)::q -> " \n\tpopq "^(string_of_arg x)^(aux q)
+    | Inc(x)::q -> " \n\tinc "^(string_of_arg x)^(aux q)
+    | Dec(x)::q -> " \n\tdec "^(string_of_arg x)^(aux q)
+    | Neg(x)::q -> " \n\tnegq "^(string_of_arg x)^(aux q)
+    | Not(x)::q -> " \n\tnotq "^(string_of_arg x)^(aux q)
+    | Lea(x1, x2)::q -> " \n\tleaq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Add(x1, x2)::q -> " \n\taddq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Sub(x1, x2)::q -> " \n\tsubq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Mul(x1, x2)::q -> " \n\timulq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Div(x)::q -> " \n\tidivq "^(string_of_arg x)^(aux q)
+    | Cmp(x1, x2)::q -> " \n\t cmpq "^(string_of_arg x1)^", "^(string_of_arg x2)^(aux q)
+    | Label(s)::q -> " \n"^s^": "^(aux q)
+    | SubLabel(i)::q -> " \n.L"^(string_of_int i)^": "^(aux q)
+    | Jmp(i)::q -> " \n\tjmp "^".L"^(string_of_int i)^(aux q)
+    | Jle(i)::q -> " \n\tjle "^".L"^(string_of_int i)^(aux q)
+    | Jl(i)::q -> " \n\tjl "^".L"^(string_of_int i)^(aux q)
+    | Je(i)::q -> " \n\tje "^".L"^(string_of_int i)^(aux q)
+    | Jne(i)::q -> " \n\tjne "^".L"^(string_of_int i)^(aux q)
+    | Call(s)::q -> " \n\t.align 16 \n\tcallq "^s^(aux q)
+    | CallExt(s)::q -> " \n\t.align 16 \n\tcallq "^s^" "^(aux (Comment("fonction externe")::q))
+    | Ret::q -> " \n\tret"^(aux q)
+    | [] -> " \n \n# MCC Mohamed HADJOUDJ 2019 \n"
+  and string_of_arg = function
+      Reg(r) -> string_of_reg r
+    | Str(s) -> let i = match getIndex s (List.rev !strings) with None -> strings:=s::!strings; List.length !strings | Some i -> i+1 in
+      ".S"^(string_of_int i)^(string_of_arg (Offset(0, Rip)))
+    | Cst(i) -> "$"^(string_of_int i)
+    | GlobalVar(i) -> ".V"^(string_of_int i)^(string_of_arg (Offset(0, Rip)))
+    | ExtVar(s) -> s^(string_of_arg (Offset(0, Rip)))
+    | Offset(i, r) -> (if i != 0 then string_of_int i else "")^"("^(string_of_reg r)^")"
+    | ArrayEl(r1, r2) -> "("^(string_of_reg r1)^", "^(string_of_reg r2)^", 8)"
+  and string_of_reg = function
+      Rax -> "%rax"
+    | Rbx  -> "%rbx"
+    | Rcx  -> "%rcx"
+    | Rdx  -> "%rdx"
+    | Rsi  -> "%rsi"
+    | Rdi  -> "%rdi"
+    | Rbp  -> "%rbp"
+    | Rsp  -> "%rsp"
+    | R8  -> "%r8"
+    | R9  -> "%r9"
+    | R10  -> "%r10"
+    | R11  -> "%r11"
+    | R12  -> "%r12"
+    | R13  -> "%r13"
+    | R14  -> "%r14"
+    | R15 -> "%r15"
+    | Rip -> "%rip"
+  in let s = aux l in
+    ".data \n.text \n.globl main \n"^s^(if !strings != [] then "\n.section .rodata\n\t.align 8\n"^(
+      String.concat "\n" (List.mapi (fun i s -> ".S"^(string_of_int (i+1))^":\n\t.string \""^(String.escaped s)^"\"") (List.rev !strings))
+    ) else "")
 
-  and compile_expr = function
-      CST(i) -> Printf.sprintf "\tmovq $%d, %%rax\n" i
-    | VAR(s) -> Printf.sprintf "\tmovq %s, %%rax \n" (var_reg s)    | STRING(s) -> strings := s::!strings; Printf.sprintf "\tleaq .ST%d(%%rip), %%rax\n" (List.length !strings)
-    | CALL(s, l) -> let s' = (join (List.map (fun (_, expr) -> (compile_expr expr)^"\tpushq %rax\n") (List.rev l))) in
-      let i = min 6 (List.length l) in let rec aux = function i when i > 0 -> (aux (i-1))^"\tpopq "^args_reg.(i-1)^"\n" | _ -> s'
-      in (aux i)^"\tmovq $0, %rax\n\t.align 16\n\tcallq "^s^"\n"
-    | SET_VAR(s, (_, expr)) -> (compile_expr expr)^(Printf.sprintf "\tmovq %%rax, %s\n" (var_reg s))
-    | SET_ARRAY(s, (_, expr1), (_, expr2)) -> (compile_expr expr1)^"\tpushq %r9\n\tpushq %r10\n\tmovq %rax, %r9\n"^(compile_expr expr2)^"\tmovq "^(var_reg s)^", %r10\n\tmovq %rax, (%r10, %r9, 8)\n\tpopq %r10\n\tpopq %r9\n"
-    | OP1(M_MINUS, (_, expr)) -> (compile_expr expr)^"\tnegq %rax \n"
-    | OP1(M_NOT, (_, expr)) -> (compile_expr expr)^"\tnotq %rax \n"
-    | OP1(mop, (_, VAR(s))) -> "\tmovq "^(var_reg s)^", %rax\n"^(match mop with
-      | M_POST_INC -> "\tpushq %rax\n\tinc %rax\n\tmovq %rax, "^(var_reg s)^"\n\tpopq %rax\n"
-      | M_POST_DEC -> "\tpushq %rax\n\tdec %rax\n\tmovq %rax, "^(var_reg s)^"\n\tpopq %rax\n"
-      | M_PRE_INC -> "\tinc %rax\n\tmovq %rax, "^(var_reg s)^"\n"
-      | M_PRE_DEC -> "\tdec %rax\n\tmovq %rax, "^(var_reg s)^"\n")
-    | OP1(mop, (_, OP2(S_INDEX, (_, expr1), (_, expr2)))) -> "\tpushq %r9\n\tpushq %r10\n"^(compile_expr expr1)^"\tmovq %rax, %r9\n"^(compile_expr expr2)^"\tmovq %rax, %r10\n\tmovq (%r9, %r10, 8), %rax\n"^(match mop with
-      | M_POST_INC -> "\tpushq %rax\n\tinc %rax\n\tmovq %rax, (%r9, %r10, 8)\n\tpopq %rax\n"
-      | M_POST_DEC -> "\tpushq %rax\n\tdec %rax\n\tmovq %rax, (%r9, %r10, 8)\n\tpopq %rax\n"
-      | M_PRE_INC ->  "\tinc %rax\n\tmovq %rax, (%r9, %r10, 8)\n"
-      | M_PRE_DEC ->  "\tdec %rax\n\tmovq %rax, (%r9, %r10, 8)\n")^"\tpopq %r10\n\tpopq %r9\n"
-    | OP2(bop, (_, expr1), (_, expr2)) -> "\tpushq %r9\n"^(match bop with
-        S_MUL -> (compile_expr expr1)^"\tpushq %rax\n"^(compile_expr expr2)^"\tpopq %r9\n\timulq %r9,%rax\n"
-      | S_DIV -> (compile_expr expr2)^"\tpushq %rax\n"^(compile_expr expr1)^"\tpopq %r9\n\tcqto\n\tpushq %rdx\n\tidivq %r9\n\tpopq %rdx\n"
-      | S_MOD -> (compile_expr expr2)^"\tpushq %rax\n"^(compile_expr expr1)^"\tpopq %r9\n\tcqto\n\tpushq %rdx\n\tidivq %r9\n\tmovq %rdx, %rax\n\tpopq %rdx\n"
-      | S_ADD -> (compile_expr expr1)^"\tpushq %rax\n"^(compile_expr expr2)^"\tpopq %r9\n\taddq %r9,%rax\n"
-      | S_SUB -> (compile_expr expr2)^"\tpushq %rax\n"^(compile_expr expr1)^"\tpopq %r9\n\tsubq %r9,%rax\n"
-      | S_INDEX -> (compile_expr expr1)^"\tpushq %rax\n"^(compile_expr expr2)^"\tpopq %r9\n\tpushq %r10\n\tmovq %rax,%r10\n\tmovq (%r9, %r10, 8),%rax \n\tpopq %r10\n"
-      )^"\tpopq %r9\n"
-    | CMP(cop, (erl, expr1), (_, expr2)) -> let id = uniqid () and cmp = (match cop with C_LT -> "jg" | C_LE -> "jge" | C_EQ -> "je") in
-      "\tpushq %r10\n"^(compile_expr expr1)^"\tmovq %rax, %r10\n"^(compile_expr expr2)^"\tcmpq %r10, %rax\n\t"^cmp^" .cmp"^id^"b\n\tmovq $0, %rax\n\tjmp .cmp"^id^"e\n.cmp"^id^"b:\n\tmovq $1, %rax\n.cmp"^id^"e:\n"
-    | EIF((_, expr0), (_, expr1), (_, expr2)) -> let id = uniqid () in 
-        (compile_expr expr0)^"\tcmpq $0, %rax\n\tje .eif"^id^"b\n"^(compile_expr expr1)^"\tjmp .eif"^id^"e\n.eif"^id^"b:\n"^(compile_expr expr2)^".eif"^id^"e:\n"
-    | ESEQ(l) -> ""
-    | _ -> ""
-  in let rec declare_int name = global_vars := name::!global_vars
-  and compile_fun name decl code = 
-    let s1 = declare_args decl in
-    let s2 = compile_code code in
-    Printf.sprintf "%s:\n\tpushq %%rbp\n\tmovq %%rsp, %%rbp\n%s\n%s\n" name s1 s2
-  in let output () = 
-    Printf.fprintf out ".data \n";
-    List.iter (fun n -> Printf.fprintf out "\t.%s: .space 8 \n" n;) (!global_vars);
-    Printf.fprintf out ".text \n.globl main \n";
-    List.iter (fun s -> Printf.fprintf out "%s" s) (List.rev !funs);
-    Printf.fprintf out ".section .rodata \n\t.align 8\n";
-    List.iteri (fun i s -> Printf.fprintf out ".ST%d:\n\t.string \"%s\"\n" (i+1) s) (List.map (String.escaped) (List.rev !strings));
-  in let rec aux = function
-    | [] -> output ()
-    | CDECL(_, name)::q -> declare_int name; aux q
-    | CFUN(_, name, decl, (_, code))::q -> funs := (compile_fun name decl code)::!funs; aux q
-  in aux l
+
+
+(* Simplifie le code ne faisant intervenir aucune variable. *)
+let rec optimise_code (loc0, code0) = match code0 with
+    CBLOCK (vars, l) ->  loc0, CBLOCK (vars, List.map optimise_code l)
+  | CIF(e, c1, c2) -> begin match (optimise_expr e) with (_, CST x) -> optimise_code (if x=0 then c2 else c1) 
+    | e' -> loc0, CIF(e', c1, c2) end
+  | CWHILE(e, c) -> begin match (optimise_expr e) with (loc, CST x) -> (if x=0 then loc0, CBLOCK([],[]) else loc0, CWHILE((loc, CST 1), c)) 
+    | e' -> loc0, CWHILE(e', c) end
+  | CEXPR(e) -> loc0, CEXPR(optimise_expr e)
+  | CRETURN(Some e) -> loc0, CRETURN(Some(optimise_expr e))
+  | CRETURN(None) -> loc0, CRETURN(None)
+  | CTHROW (s, e) -> loc0, CTHROW(s, optimise_expr e)
+  | CTRY(code, l, Some finally) -> loc0, CTRY(optimise_code code, List.map (fun (a,b,c) -> (a,b,optimise_code c)) l, Some (optimise_code finally))
+  | CTRY(code, l, None) -> loc0, CTRY(optimise_code code, List.map (fun (a,b,c) -> (a,b,optimise_code c)) l, None)
+
+(* Calcul les expressions ne faisant intervenir aucune variable. *)
+and optimise_expr (loc, expr) = match expr with
+  | OP1 (op, e) -> (match (optimise_expr e), op with (_, CST x),M_MINUS -> (loc, CST (-x)) | _ -> (loc, expr))
+  | OP2 (op, e1, e2) -> begin match (optimise_expr e1),(optimise_expr e2) with 
+        (_, CST x1), (_, CST x2) -> begin match op with
+            S_MUL -> (loc, CST (x1*x2))
+          | S_DIV -> (loc, CST (x1/x2))
+          | S_MOD -> (loc, CST (x1 mod x2))
+          | S_ADD -> (loc, CST (x1+x2))
+          | S_SUB -> (loc, CST (x1-x2))
+          | _ -> (loc, expr)
+        end 
+      | (_, STRING s), (_, CST x) -> if op = S_INDEX then (loc, STRING (String.sub s x 1)) else (loc, expr) 
+      | _ -> (loc, expr)
+    end
+  | CMP (op, e1, e2) -> begin match (optimise_expr e1),(optimise_expr e2) with
+        (_, CST x1), (_, CST x2) -> if (C_LT = op && x1 < x2) || (C_LE = op && x1 <= x2) || (C_EQ = op && x1 == x2) then (loc,CST 1) else (loc,CST 0)
+      | _ -> (loc, expr)
+    end
+  | EIF (e1, e2, e3) -> (match (optimise_expr e1) with (_, CST x) -> if x!=0 then optimise_expr e2 else optimise_expr e3 | _ -> (loc, expr))
+  | _ -> (loc, expr)
+
+
+let compile out declarations = 
+  let args_reg = [|Rdi; Rsi; Rdx; Rcx; R8; R9|] in
+
+  let local_vars = ref [] in
+  (* Liste des variables globales. On vérifie que chaque variable est utilisée au moins une fois. *)
+  let global_vars = List.fold_left (fun a b -> match b with 
+      CDECL (loc,s) -> 
+        if not (List.exists (fun dec -> match dec with CDECL _ -> false | CFUN(_,_,_,(_,code)) -> var_is_used s code) declarations) 
+        then Error.warning (Some loc) ("Variable inutilisée: \""^s^"\".");
+        s::a
+    | _ -> a) ["NULL"] declarations in
+  (* Liste des fonctions. On vérife qu'aucune fonction n'a été définie plusieurs fois. *)
+  let funs = List.fold_left (fun a b -> match b with 
+      CFUN (loc,s,vars,_) -> if (List.exists (fun (a,b) -> a=s) a) then Error.fatal (Some loc) ("Redéclaration de la fonction \""^s^"\".");
+        (s, List.length vars)::a 
+    | _ -> a) [] declarations in
+  
+  let declare_vars vars = let n = List.length vars in if n < 1 then [] else
+    [
+      Sub (Cst (8*n), Reg Rsp);
+      Comment ("var "^(String.concat ", " (List.map 
+      (fun a -> match a with CDECL(loc,s) -> 
+        if s = "NULL" then Error.fatal (Some loc) ("NULL est un mot clé réservé.");
+        local_vars:=s::!local_vars; s | _ -> "") 
+      vars
+      )))
+    ]
+  in let destroy_vars n = for i = 1 to (min n (List.length !local_vars)) do local_vars := List.tl !local_vars; done; if n<1 then [] else [
+        Add(Cst (n*8), Reg Rsp)
+      ]
+  in let declare_args args = 
+    local_vars := [];
+    (declare_vars args)@(List.flatten (List.mapi (fun i a -> match a with
+        CDECL(loc,s) -> if i < 6 then [Mov (Reg (args_reg.(i)), Offset(-8*(i+1), Rbp))]
+      else [
+        Mov (Offset(8*(i-4), Rbp), Reg Rax);
+        Mov (Reg Rax, (Offset(-8*(i+1), Rbp)));
+      ]
+      | _ -> []
+    ) args ))
+  in
+
+  (* Compile du code en un programme. *)
+  let rec compile_code (loc0, code0) = match code0 with  
+      CBLOCK (vars, l) -> let t1 = (declare_vars vars) in 
+        let t2 = List.flatten (List.map 
+          (fun a -> let (_,l1,c1,l2,c2),_= a in (compile_code a)@[Comment (Printf.sprintf "%d:%d -> %d:%d" l1 c1 l2 c2)])
+         l) in
+        t1 @ t2 @ (destroy_vars (List.length vars)) 
+    | CIF(e, c1, c2) -> let i = uniqI () in let j = uniqI () in
+      let t1 = compile_expr e in let t2 = compile_code c1 in let t3 = compile_code c2 in
+      t1@[
+        Cmp (Cst 0, Reg Rax);Comment "hééh";
+        Je i;
+      ]@t2@[
+        Jmp j;
+        SubLabel i;
+      ]@t3@[
+        SubLabel j;
+      ]
+    | CWHILE(e, c) -> let i = uniqI () in let j = uniqI () in 
+      let t1 = compile_expr e in let t2 = compile_code c in
+      [
+        SubLabel i;
+      ]@t1@[
+        Cmp (Cst 0, Reg Rax);
+        Je j;
+      ]@t2@[
+        Jmp i;
+        SubLabel j;
+      ]
+    | CEXPR(e) -> compile_expr e;
+    | CRETURN(Some e) -> let t = compile_expr e in t @ (compile_code (loc0,CRETURN(None)))
+    | CRETURN(None) -> [
+      Mov (Reg Rbp, Reg Rsp);
+      Pop (Reg Rbp);
+      Ret;
+    ]
+    | CTHROW (s, e) -> []
+    | CTRY(code, l, Some finally) -> let t1 = compile_code (loc0, CTRY(code, l, None)) in let t2 = compile_code finally in t1@t2
+    | CTRY(code, l, None) -> []
+  and compile_expr (loc0, expr0) = 
+    let addr_of_expr (loc0, expr0) = match expr0 with VAR s when s!="NULL"-> 
+      begin match getIndex s !local_vars with
+          Some i -> [],Offset(-(8*((List.length !local_vars)-i)), Rbp)
+        | None -> (match getIndex s global_vars with
+            Some i -> [],GlobalVar i
+          | None -> [],ExtVar s)
+      end
+      | OP2(S_INDEX, e1, e2) -> let t1 = compile_expr e1 in let t2 = (compile_expr e2) in t1@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t2@[Mov (Reg Rax, Reg Rdx)], ArrayEl (Rcx, Rdx)
+      | _ -> Error.fatal (Some(loc0)) "Impossible d'acceder à l'addresse de l'expression.";
+    in match expr0 with
+    | VAR(s) -> let _, v = addr_of_expr (loc0, expr0) in [Mov (v, Reg Rax)]
+    | CST(i) -> [Mov (Cst i, Reg Rax)]
+    | STRING(s) -> [Lea (Str s, Reg Rax)]
+    | SET_VAR(s,e) -> let _, v = addr_of_expr (loc0, VAR s) in (compile_expr e)@[Mov(Reg Rax, v)]
+    | SET_ARRAY(s,e1,e2) -> let p, v = addr_of_expr (loc0, OP2(S_INDEX, (loc0, VAR s), e1)) in p@(compile_expr e2)@[Mov(Reg Rax, v)]
+    | CALL(s, el) -> (match List.find_all (fun (a,b) -> a=s) funs with
+        (i,j)::_-> if List.length el != j then Error.fatal (Some(loc0)) "Mauvais nombre d'arguments.";
+      | [] -> ());
+      let i = min 6 (List.length el) in
+      (List.flatten (List.map (fun e -> (compile_expr e)@[Push (Reg Rax)]) (List.rev el))) @
+      (List.mapi (fun i _ -> Pop (Reg args_reg.(i))) (Array.to_list (Array.make i 0))) @ [Call s]
+    | OP1(op, e) -> begin match op with
+          M_MINUS -> (compile_expr e)@[Neg (Reg Rax)]
+        | M_NOT -> (compile_expr e)@[Not (Reg Rax)]
+        | M_POST_INC -> let p, v = addr_of_expr e in p@[Push v; Mov (v, Reg Rax); Inc (Reg Rax); Mov (Reg Rax, v); Pop (Reg Rax)]
+        | M_POST_DEC -> let p, v = addr_of_expr e in p@[Push v; Mov (v, Reg Rax); Dec (Reg Rax); Mov (Reg Rax, v); Pop (Reg Rax)]
+        | M_PRE_INC -> let p, v = addr_of_expr e in p@[Mov(v, Reg Rax); Inc(Reg Rax); Mov(Reg Rax, v)]
+        | M_PRE_DEC -> let p, v = addr_of_expr e in p@[Mov(v, Reg Rax); Dec(Reg Rax); Mov(Reg Rax, v)]
+      end
+    | OP2(op, e1, e2) -> begin match op with 
+        S_MUL -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in 
+        t1@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t2@ [
+          Mul (Reg Rcx, Reg Rax);
+        ]
+      | S_DIV -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in
+        t2@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t1@ [
+          Div (Reg Rcx);
+        ]
+      | S_MOD -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in
+        t2@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t1@ [
+          Div (Reg Rcx);
+          Mov (Reg Rdx, Reg Rax)
+        ]
+      | S_ADD -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in
+        t1@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t2@ [
+          Add (Reg Rcx, Reg Rax);
+        ]
+      | S_SUB -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in
+        t1@[
+          Mov (Reg Rax, Reg Rcx)
+        ]@t2@ [
+          Sub (Reg Rcx, Reg Rax);
+        ]
+      | S_INDEX -> let p,v = addr_of_expr (loc0, expr0) in p@ [
+          Mov (v, Reg Rax)
+        ]
+      end
+    | CMP(op, e1, e2) -> let t1 = compile_expr e1 in let t2 = compile_expr e2 in let i = uniqI () in let j = uniqI () in 
+      t1@[
+        Mov (Reg Rax, Reg Rcx)
+      ]@t2@[
+        Cmp (Reg Rax, Reg Rcx);
+        (match op with C_LT -> Jl i | C_LE -> Jle i| C_EQ -> Je i); Comment ("string_of_int j");
+        Mov (Cst 0, Reg Rax);
+        Jmp j;
+        SubLabel i;
+        Mov (Cst 1, Reg Rax);
+        SubLabel j;
+      ]
+    | EIF (e1, e2, e3) -> compile_code (loc0, CIF(e1, (loc0, CEXPR e2), (loc0, CEXPR e3)))
+    | ESEQ(el) -> List.flatten (List.map compile_expr el)
+  in
+  Printf.fprintf out "%s\n" (asm_of_program (
+    List.fold_left (fun a b -> match b with 
+      CFUN(loc,s,args,code) -> local_vars:=[]; let code' = optimise_code code in let t1 = (declare_args args) in
+      let t2 = (compile_code code') in
+        [
+          Label s;
+          Push (Reg Rbp);
+          Mov (Reg Rsp, Reg Rbp)
+        ]@t1@t2@a
+    | _ -> a
+    ) [] declarations 
+      
+  ))
+
+
+
+  
