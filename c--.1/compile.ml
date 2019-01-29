@@ -315,9 +315,17 @@ let compile out declarations =
         Mov (InternalVar "RET_FINALLY_RAX", Reg Rax);
         Mov (InternalVar "RET_FINALLY_RBX", Reg Rbx);
         Mov (InternalVar "RET_FINALLY_RCX", Reg Rcx);
-        Mov (Cst 0, InternalVar "RET_FINALLY");
+      ]@(match !tryStack with [] -> [] | (tryId, _)::q -> [
+        Mov (Cst 1, InternalVar "RET_FINALLY");
+        Mov (Reg Rax, InternalVar "RET_FINALLY_RAX");
+        Mov (Reg Rbx, InternalVar "RET_FINALLY_RBX");
+        Mov (Reg Rcx, InternalVar "RET_FINALLY_RCX");
+        Jmp tryId;
+      ]) @ [
         Mov (Reg Rbp, Reg Rsp);
         Pop (Reg Rbp);
+        Ret;
+      ]@[
         Ret;
         SubLabel id;
       ]
